@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1f6feb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Mortgage Calculator</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --card: #ffffff;
+      --text: #1b1f24;
+      --muted: #5c6670;
+      --border: #d5dbe3;
+      --accent: #1f6feb;
+      --accent-soft: #e7f0fe;
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1216;
+        --card: #181c22;
+        --text: #e6e9ee;
+        --muted: #9aa4af;
+        --border: #2c333c;
+        --accent: #4c8dff;
+        --accent-soft: #1a2638;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.4;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    main { max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.35rem; margin: 8px 0 16px; }
+    h2 { font-size: 1rem; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* Results */
+    .result-main { text-align: center; padding: 8px 0 12px; }
+    .result-main .label { color: var(--muted); font-size: .9rem; }
+    .result-main .value { font-size: 2.4rem; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .rows { border-top: 1px solid var(--border); }
+    .row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+    .row:last-child { border-bottom: none; }
+    .row span:first-child { color: var(--muted); }
+    .row.total span { font-weight: 700; color: var(--text); }
+    .note { font-size: .82rem; color: var(--muted); margin: 10px 0 0; }
+    .warn { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; font-size: .88rem; margin-top: 12px; }
+
+    /* Form */
+    .field { margin-bottom: 14px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: .9rem; font-weight: 600; margin-bottom: 6px; }
+    label .opt { font-weight: 400; color: var(--muted); }
+    .input-wrap { position: relative; display: flex; align-items: center; }
+    .input-wrap .prefix, .input-wrap .suffix {
+      position: absolute; color: var(--muted); pointer-events: none; font-size: 1rem;
+    }
+    .input-wrap .prefix { left: 12px; }
+    .input-wrap .suffix { right: 12px; }
+    input, select {
+      width: 100%;
+      font-size: 16px; /* prevents iOS zoom on focus */
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 46px;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .has-prefix input { padding-left: 26px; }
+    .has-suffix input { padding-right: 52px; }
+    .split { display: flex; gap: 8px; }
+    .split > * { flex: 1; min-width: 0; }
+
+    .segmented { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+    .segmented button {
+      flex: 1; border: 0; background: transparent; color: var(--text);
+      font-size: 15px; padding: 10px 0; border-radius: 8px; min-height: 40px; cursor: pointer;
+    }
+    .segmented button.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+    .reset { width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 12px; border-radius: 10px; font-size: 15px; }
+    footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 4px 0 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Mortgage Calculator</h1>
+
+  <section class="card" aria-live="polite">
+    <div class="result-main">
+      <div class="label">Total monthly payment</div>
+      <div class="value" id="totalMonthly">$0</div>
+    </div>
+    <div class="rows">
+      <div class="row"><span>Mortgage (P&amp;I)</span><span id="outPI">$0</span></div>
+      <div class="row" id="rowTax"><span>Property tax</span><span id="outTax">$0</span></div>
+      <div class="row" id="rowFees"><span>Maintenance fees</span><span id="outFees">$0</span></div>
+      <div class="row"><span>Loan amount</span><span id="outLoan">$0</span></div>
+      <div class="row"><span>Down payment</span><span id="outDown">$0</span></div>
+      <div class="row"><span>Total interest over term</span><span id="outInterest">$0</span></div>
+    </div>
+    <div class="warn" id="variableNote" hidden></div>
+    <p class="note" id="compoundNote"></p>
+  </section>
+
+  <section class="card">
+    <h2>Loan</h2>
+
+    <div class="field">
+      <label for="price">Home price</label>
+      <div class="input-wrap has-prefix">
+        <span class="prefix">$</span>
+        <input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="600,000" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="down">Down payment</label>
+      <div class="split">
+        <div class="input-wrap" id="downWrap">
+          <span class="prefix" id="downPrefix">$</span>
+          <span class="suffix" id="downSuffix">%</span>
+          <input id="down" type="text" inputmode="decimal" autocomplete="off" placeholder="120,000" />
+        </div>
+        <div class="segmented" style="flex:0 0 108px" role="group" aria-label="Down payment unit">
+          <button type="button" data-down-unit="amount">$</button>
+          <button type="button" data-down-unit="percent">%</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="rate">Interest rate</label>
+      <div class="input-wrap has-suffix">
+        <span class="suffix">%</span>
+        <input id="rate" type="text" inputmode="decimal" autocomplete="off" placeholder="4.5" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Mortgage type</label>
+      <div class="segmented" role="group" aria-label="Mortgage type">
+        <button type="button" data-type="fixed">Fixed</button>
+        <button type="button" data-type="variable">Variable</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="amort">Amortization</label>
+      <div class="input-wrap has-suffix">
+        <span class="suffix">years</span>
+        <input id="amort" type="text" inputmode="numeric" autocomplete="off" placeholder="25" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="compounding">Interest compounding</label>
+      <select id="compounding">
+        <option value="auto">Canadian standard (fixed: semi-annual, variable: monthly)</option>
+        <option value="2">Semi-annual</option>
+        <option value="12">Monthly (US standard)</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Extras</h2>
+    <div class="field">
+      <label for="tax">Annual property tax <span class="opt">(optional)</span></label>
+      <div class="input-wrap has-prefix">
+        <span class="prefix">$</span>
+        <input id="tax" type="text" inputmode="decimal" autocomplete="off" placeholder="0" />
+      </div>
+    </div>
+    <div class="field">
+      <label for="fees">Monthly maintenance fees <span class="opt">(optional)</span></label>
+      <div class="input-wrap has-prefix">
+        <span class="prefix">$</span>
+        <input id="fees" type="text" inputmode="decimal" autocomplete="off" placeholder="0" />
+      </div>
+    </div>
+  </section>
+
+  <button type="button" class="reset" id="reset">Reset all</button>
+  <footer>Values are saved on this device only.</footer>
+</main>
+
+<script>
+(function () {
+  const STORAGE_KEY = 'mortgage-calculator:v1';
+  const defaults = {
+    price: '', down: '', downUnit: 'amount', rate: '', type: 'fixed',
+    amort: '25', compounding: 'auto', tax: '', fees: ''
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const textFields = ['price', 'down', 'rate', 'amort', 'tax', 'fees'];
+  let state = load();
+
+  function load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      return Object.assign({}, defaults, saved);
+    } catch (e) {
+      return Object.assign({}, defaults);
+    }
+  }
+  function save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  const num = (s) => {
+    const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
+    return isFinite(n) ? n : 0;
+  };
+  const money = (n, cents) => n.toLocaleString(undefined, {
+    style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0
+  });
+  // Format a dollar input with thousands separators while keeping decimals the user typed.
+  const groupDigits = (s) => {
+    const clean = String(s).replace(/[^0-9.]/g, '');
+    if (!clean) return '';
+    const [int, ...rest] = clean.split('.');
+    const grouped = (int || '0').replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return rest.length ? grouped + '.' + rest.join('').slice(0, 2) : grouped;
+  };
+  const isMoneyField = (id) => id === 'price' || id === 'tax' || id === 'fees' || (id === 'down' && state.downUnit === 'amount');
+
+  function monthlyPayment(principal, annualRatePct, years, periodsPerYear) {
+    const n = Math.round(years * 12);
+    if (principal <= 0 || n <= 0) return 0;
+    const nominal = annualRatePct / 100;
+    if (nominal === 0) return principal / n;
+    // Effective monthly rate from the nominal annual rate compounded `periodsPerYear` times.
+    const r = Math.pow(1 + nominal / periodsPerYear, periodsPerYear / 12) - 1;
+    return principal * r / (1 - Math.pow(1 + r, -n));
+  }
+
+  function compoundingPeriods() {
+    if (state.compounding === 'auto') return state.type === 'fixed' ? 2 : 12;
+    return Number(state.compounding);
+  }
+
+  function render() {
+    const price = num(state.price);
+    let down = num(state.down);
+    if (state.downUnit === 'percent') down = price * Math.min(down, 100) / 100;
+    down = Math.min(down, price);
+    const loan = Math.max(price - down, 0);
+    const rate = num(state.rate);
+    const years = num(state.amort);
+    const periods = compoundingPeriods();
+
+    const pi = monthlyPayment(loan, rate, years, periods);
+    const tax = num(state.tax) / 12;
+    const fees = num(state.fees);
+    const total = pi + tax + fees;
+    const interest = Math.max(pi * Math.round(years * 12) - loan, 0);
+
+    $('totalMonthly').textContent = money(total, true);
+    $('outPI').textContent = money(pi, true);
+    $('outTax').textContent = money(tax, true);
+    $('outFees').textContent = money(fees, true);
+    $('rowTax').hidden = !tax;
+    $('rowFees').hidden = !fees;
+    $('outLoan').textContent = money(loan);
+    const downPct = price ? (down / price * 100) : 0;
+    $('outDown').textContent = money(down) + (price ? ` (${downPct.toFixed(1)}%)` : '');
+    $('outInterest').textContent = money(interest);
+
+    const vn = $('variableNote');
+    if (state.type === 'variable' && loan > 0 && years > 0) {
+      const up = monthlyPayment(loan, rate + 1, years, periods);
+      const down1 = monthlyPayment(loan, Math.max(rate - 1, 0), years, periods);
+      vn.hidden = false;
+      vn.innerHTML = `Variable rate: if rates move ±1%, your mortgage payment would be about ` +
+        `<strong>${money(down1, true)}</strong> – <strong>${money(up, true)}</strong>.`;
+    } else {
+      vn.hidden = true;
+    }
+
+    $('compoundNote').textContent = `Interest compounded ${periods === 2 ? 'semi-annually' : 'monthly'}, paid monthly.`;
+
+    // Sync toggle buttons
+    document.querySelectorAll('[data-type]').forEach(b => b.classList.toggle('active', b.dataset.type === state.type));
+    document.querySelectorAll('[data-down-unit]').forEach(b => b.classList.toggle('active', b.dataset.downUnit === state.downUnit));
+    const pct = state.downUnit === 'percent';
+    $('downPrefix').hidden = pct;
+    $('downSuffix').hidden = !pct;
+    $('downWrap').className = 'input-wrap ' + (pct ? 'has-suffix' : 'has-prefix');
+    $('down').placeholder = pct ? '20' : '120,000';
+  }
+
+  // Populate inputs from saved state
+  textFields.forEach(id => {
+    const el = $(id);
+    el.value = isMoneyField(id) ? groupDigits(state[id]) : state[id];
+    el.addEventListener('input', () => {
+      if (isMoneyField(id)) {
+        // Reformat with commas, preserving caret position relative to digits.
+        const before = el.value.slice(0, el.selectionStart).replace(/[^0-9.]/g, '').length;
+        el.value = groupDigits(el.value);
+        let pos = 0, seen = 0;
+        while (pos < el.value.length && seen < before) { if (/[0-9.]/.test(el.value[pos])) seen++; pos++; }
+        el.setSelectionRange(pos, pos);
+      }
+      state[id] = el.value.replace(/,/g, '');
+      save();
+      render();
+    });
+  });
+
+  $('compounding').value = state.compounding;
+  $('compounding').addEventListener('change', (e) => { state.compounding = e.target.value; save(); render(); });
+
+  document.querySelectorAll('[data-type]').forEach(b => b.addEventListener('click', () => {
+    state.type = b.dataset.type; save(); render();
+  }));
+
+  document.querySelectorAll('[data-down-unit]').forEach(b => b.addEventListener('click', () => {
+    const unit = b.dataset.downUnit;
+    if (unit === state.downUnit) return;
+    // Convert the existing value so the down payment stays the same.
+    const price = num(state.price);
+    const cur = num(state.down);
+    if (state.down !== '' && price > 0) {
+      state.down = unit === 'percent'
+        ? String(+(cur / price * 100).toFixed(2))
+        : String(Math.round(price * cur / 100));
+    }
+    state.downUnit = unit;
+    $('down').value = unit === 'amount' ? groupDigits(state.down) : state.down;
+    save(); render();
+  }));
+
+  $('reset').addEventListener('click', () => {
+    if (!confirm('Clear all values?')) return;
+    state = Object.assign({}, defaults);
+    save();
+    textFields.forEach(id => { $(id).value = state[id]; });
+    $('compounding').value = state.compounding;
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
