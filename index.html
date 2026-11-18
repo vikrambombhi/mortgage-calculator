@@ -29,6 +29,7 @@
       }
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html { -webkit-text-size-adjust: 100%; }
     body {
       margin: 0;
@@ -59,6 +60,7 @@
     .row span:first-child { color: var(--muted); }
     .row.total span { font-weight: 700; color: var(--text); }
     .note { font-size: .82rem; color: var(--muted); margin: 10px 0 0; }
+    .warn.alert { border-left: 3px solid #d29922; }
     .warn { background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; font-size: .88rem; margin-top: 12px; }
 
     /* Form */
@@ -97,6 +99,8 @@
     }
     .segmented button.active { background: var(--accent); color: #fff; font-weight: 600; }
 
+    .check { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: .95rem; margin: 0; cursor: pointer; }
+    .check input { width: 22px; height: 22px; min-height: 0; padding: 0; -webkit-appearance: auto; appearance: auto; accent-color: var(--accent); flex: none; }
     .reset { width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 12px; border-radius: 10px; font-size: 15px; }
     footer { text-align: center; color: var(--muted); font-size: .78rem; padding: 4px 0 24px; }
   </style>
@@ -114,10 +118,14 @@
       <div class="row"><span>Mortgage (P&amp;I)</span><span id="outPI">$0</span></div>
       <div class="row" id="rowTax"><span>Property tax</span><span id="outTax">$0</span></div>
       <div class="row" id="rowFees"><span>Maintenance fees</span><span id="outFees">$0</span></div>
-      <div class="row"><span>Loan amount</span><span id="outLoan">$0</span></div>
       <div class="row"><span>Down payment</span><span id="outDown">$0</span></div>
-      <div class="row"><span>Total interest over term</span><span id="outInterest">$0</span></div>
+      <div class="row"><span>Loan amount</span><span id="outLoan">$0</span></div>
+      <div class="row" id="rowCmhc"><span id="cmhcLabel">CMHC insurance</span><span id="outCmhc">$0</span></div>
+      <div class="row" id="rowMortgage"><span>Total mortgage</span><span id="outMortgage">$0</span></div>
+      <div class="row"><span id="interestLabel">Total interest over amortization</span><span id="outInterest">$0</span></div>
     </div>
+    <div class="warn alert" id="cmhcWarn" hidden></div>
+    <div class="warn" id="cmhcNote" hidden></div>
     <div class="warn" id="variableNote" hidden></div>
     <p class="note" id="compoundNote"></p>
   </section>
@@ -180,6 +188,10 @@
         <option value="12">Monthly (US standard)</option>
       </select>
     </div>
+
+    <div class="field">
+      <label class="check"><input type="checkbox" id="cmhc" /> Add CMHC insurance when down payment is under 20%</label>
+    </div>
   </section>
 
   <section class="card">
@@ -209,7 +221,7 @@
   const STORAGE_KEY = 'mortgage-calculator:v1';
   const defaults = {
     price: '', down: '', downUnit: 'amount', rate: '', type: 'fixed',
-    amort: '25', compounding: 'auto', tax: '', fees: ''
+    amort: '25', compounding: 'auto', tax: '', fees: '', cmhc: true
   };
 
   const $ = (id) => document.getElementById(id);
@@ -241,7 +253,7 @@
     const clean = String(s).replace(/[^0-9.]/g, '');
     if (!clean) return '';
     const [int, ...rest] = clean.split('.');
-    const grouped = (int || '0').replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const grouped = int.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return rest.length ? grouped + '.' + rest.join('').slice(0, 2) : grouped;
   };
   const isMoneyField = (id) => id === 'price' || id === 'tax' || id === 'fees' || (id === 'down' && state.downUnit === 'amount');
@@ -254,6 +266,44 @@
     // Effective monthly rate from the nominal annual rate compounded `periodsPerYear` times.
     const r = Math.pow(1 + nominal / periodsPerYear, periodsPerYear / 12) - 1;
     return principal * r / (1 - Math.pow(1 + r, -n));
+  }
+
+  // CMHC mortgage default insurance (rules in effect since Dec 15, 2024).
+  // Required when the down payment is under 20%. The premium is a % of the loan
+  // and is added to the mortgage.
+  const CMHC_MAX_PRICE = 1500000;
+  function minDownPayment(price) {
+    if (price >= CMHC_MAX_PRICE) return price * 0.20;
+    return 0.05 * Math.min(price, 500000) + 0.10 * Math.max(price - 500000, 0);
+  }
+  function cmhc(price, down, loan, years) {
+    const none = { premium: 0, rate: 0, warn: '', note: '' };
+    if (!state.cmhc || price <= 0 || loan <= 0) return none;
+    // Round so values like 0.8000000001 from floating point don't cross a tier.
+    const ltv = Math.round(loan / price * 1e6) / 1e6;
+    if (ltv <= 0.80) return none;
+    if (price >= CMHC_MAX_PRICE) {
+      return Object.assign(none, { warn: `Homes priced at ${money(CMHC_MAX_PRICE)} or more can't get CMHC insurance, so you need at least 20% down (${money(price * 0.2)}).` });
+    }
+    const minDown = minDownPayment(price);
+    if (down + 0.005 < minDown) {
+      return Object.assign(none, { warn: `Below the minimum down payment. For this price you need at least ${money(Math.ceil(minDown))} (5% of the first $500,000, 10% of the rest).` });
+    }
+    let rate = ltv <= 0.85 ? 2.80 : ltv <= 0.90 ? 3.10 : 4.00;
+    let warn = '';
+    if (years > 30) {
+      warn = 'Insured mortgages can have at most a 30-year amortization.';
+    } else if (years > 25) {
+      warn = 'A 30-year insured amortization is only for first-time buyers or new builds.';
+    }
+    if (years > 25) rate += 0.20; // CMHC surcharge for amortization over 25 years
+    const premium = loan * rate / 100;
+    return {
+      premium, rate, warn,
+      note: `The ${rate.toFixed(2)}% CMHC premium is added to your mortgage. In Ontario (8%), Quebec (9%) ` +
+        `and Saskatchewan (6%) you also pay sales tax on the premium in cash at closing ` +
+        `(about ${money(premium * 0.08)} in Ontario).`
+    };
   }
 
   function compoundingPeriods() {
@@ -271,11 +321,14 @@
     const years = num(state.amort);
     const periods = compoundingPeriods();
 
-    const pi = monthlyPayment(loan, rate, years, periods);
+    const ins = cmhc(price, down, loan, years);
+    const mortgage = loan + ins.premium;
+
+    const pi = monthlyPayment(mortgage, rate, years, periods);
     const tax = num(state.tax) / 12;
     const fees = num(state.fees);
     const total = pi + tax + fees;
-    const interest = Math.max(pi * Math.round(years * 12) - loan, 0);
+    const interest = Math.max(pi * Math.round(years * 12) - mortgage, 0);
 
     $('totalMonthly').textContent = money(total, true);
     $('outPI').textContent = money(pi, true);
@@ -287,11 +340,22 @@
     const downPct = price ? (down / price * 100) : 0;
     $('outDown').textContent = money(down) + (price ? ` (${downPct.toFixed(1)}%)` : '');
     $('outInterest').textContent = money(interest);
+    $('interestLabel').textContent = years > 0
+      ? `Total interest over ${+years.toFixed(2)} years` : 'Total interest over amortization';
+
+    $('rowCmhc').hidden = $('rowMortgage').hidden = !ins.premium;
+    $('cmhcLabel').textContent = `CMHC insurance (${ins.rate.toFixed(2)}%)`;
+    $('outCmhc').textContent = money(ins.premium);
+    $('outMortgage').textContent = money(mortgage);
+    $('cmhcWarn').hidden = !ins.warn;
+    $('cmhcWarn').textContent = ins.warn;
+    $('cmhcNote').hidden = !ins.note;
+    $('cmhcNote').textContent = ins.note;
 
     const vn = $('variableNote');
-    if (state.type === 'variable' && loan > 0 && years > 0) {
-      const up = monthlyPayment(loan, rate + 1, years, periods);
-      const down1 = monthlyPayment(loan, Math.max(rate - 1, 0), years, periods);
+    if (state.type === 'variable' && mortgage > 0 && years > 0) {
+      const up = monthlyPayment(mortgage, rate + 1, years, periods);
+      const down1 = monthlyPayment(mortgage, Math.max(rate - 1, 0), years, periods);
       vn.hidden = false;
       vn.innerHTML = `Variable rate: if rates move ±1%, your mortgage payment would be about ` +
         `<strong>${money(down1, true)}</strong> – <strong>${money(up, true)}</strong>.`;
@@ -330,6 +394,9 @@
     });
   });
 
+  $('cmhc').checked = state.cmhc;
+  $('cmhc').addEventListener('change', (e) => { state.cmhc = e.target.checked; save(); render(); });
+
   $('compounding').value = state.compounding;
   $('compounding').addEventListener('change', (e) => { state.compounding = e.target.value; save(); render(); });
 
@@ -345,8 +412,11 @@
     const cur = num(state.down);
     if (state.down !== '' && price > 0) {
       state.down = unit === 'percent'
-        ? String(+(cur / price * 100).toFixed(2))
-        : String(Math.round(price * cur / 100));
+        ? String(+Math.min(cur / price * 100, 100).toFixed(2))
+        : String(Math.round(price * Math.min(cur, 100) / 100));
+    } else {
+      // Without a price there's nothing to convert against; clear rather than reinterpret $120,000 as 120,000%.
+      state.down = '';
     }
     state.downUnit = unit;
     $('down').value = unit === 'amount' ? groupDigits(state.down) : state.down;
@@ -359,6 +429,7 @@
     save();
     textFields.forEach(id => { $(id).value = state[id]; });
     $('compounding').value = state.compounding;
+    $('cmhc').checked = state.cmhc;
     render();
   });
 

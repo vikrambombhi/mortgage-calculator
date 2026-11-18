@@ -4,6 +4,7 @@ A simple, mobile-friendly mortgage calculator in a single static `index.html` fi
 
 - Inputs: home price, down payment ($ or %), interest rate, fixed/variable, amortization, and optional annual property tax and monthly maintenance fees
 - Shows the total monthly payment, broken down into mortgage, tax, and fees
+- CMHC mortgage insurance when the down payment is under 20%: tiered premium added to the mortgage, +0.20% surcharge over 25 years, plus minimum down payment and $1.5M price cap checks (can be turned off)
 - Variable-rate mode shows what the payment would be if rates moved ±1%
 - Compounding: semi-annual for fixed and monthly for variable (the Canadian convention), or set one manually
 - Everything is saved in `localStorage` on your device
